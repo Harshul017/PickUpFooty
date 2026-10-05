@@ -1,7 +1,7 @@
 import { sql, type Kysely } from "kysely";
 import type { DB } from "../../db/types.js";
 import { Errors } from "../../lib/errors.js";
-import { isPgError, PG_EXCLUSION_VIOLATION, PG_UNIQUE_VIOLATION } from "../../lib/pg.js";
+import { isPgError, PG_EXCLUSION_VIOLATION } from "../../lib/pg.js";
 
 export type JoinResult =
   | { status: "JOINED" }
@@ -40,22 +40,10 @@ export async function takeSpotOrWaitlist(
 
       if (claimed) {
         // Step 2: add the player. The exclusion constraint on
-        // (user_id, during) WHERE status = 'JOINED' rejects this insert if
-        // the player is already in another match at an overlapping time,
+        // (user_id, during) WHERE status = 'JOINED' rejects this if the
+        // player is already in another match at an overlapping time,
         // which rolls back step 1 automatically.
-        await trx
-          .insertInto("match_players")
-          .values({
-            match_id: matchId,
-            user_id: userId,
-            team: null,
-            slot_code: null,
-            status: "JOINED",
-            during: sql<string>`(SELECT during FROM matches WHERE id = ${matchId})`,
-            waitlist_position: null,
-            offer_expires_at: null,
-          })
-          .execute();
+        await seat(trx, matchId, userId, { status: "JOINED" });
 
         return { status: "JOINED" };
       }
@@ -66,9 +54,6 @@ export async function takeSpotOrWaitlist(
     if (!isPgError(err)) throw err;
     if (err.code === PG_EXCLUSION_VIOLATION && err.constraint === "match_players_no_overlap") {
       throw Errors.playerOverlap();
-    }
-    if (err.code === PG_UNIQUE_VIOLATION && err.constraint === "match_players_pk") {
-      throw Errors.alreadyInMatch();
     }
     throw err;
   }
@@ -103,19 +88,58 @@ async function waitlist(trx: Kysely<DB>, matchId: string, userId: string): Promi
 
   const position = (last ?? 0) + 1;
 
-  await trx
+  await seat(trx, matchId, userId, { status: "WAITLISTED", position });
+
+  return { status: "WAITLISTED", position };
+}
+
+/**
+ * Write the player's match_players row. The primary key is (match, player),
+ * so a player who left this match earlier still has a CANCELLED row; that
+ * row is brought back instead of inserting a second one. Their conduct
+ * history lives in other tables and is untouched. Any other existing row
+ * (JOINED, WAITLISTED, ...) means they're already in, and nothing is written.
+ */
+async function seat(
+  trx: Kysely<DB>,
+  matchId: string,
+  userId: string,
+  spot: { status: "JOINED" } | { status: "WAITLISTED"; position: number }
+): Promise<void> {
+  const during =
+    spot.status === "JOINED"
+      ? sql<string>`(SELECT during FROM matches WHERE id = ${matchId})`
+      : null;
+  const waitlistPosition = spot.status === "WAITLISTED" ? spot.position : null;
+
+  const row = await trx
     .insertInto("match_players")
     .values({
       match_id: matchId,
       user_id: userId,
       team: null,
       slot_code: null,
-      status: "WAITLISTED",
-      during: null,
-      waitlist_position: position,
+      status: spot.status,
+      during,
+      waitlist_position: waitlistPosition,
       offer_expires_at: null,
     })
-    .execute();
+    .onConflict((oc) =>
+      oc
+        .columns(["match_id", "user_id"])
+        .doUpdateSet({
+          status: spot.status,
+          team: null,
+          slot_code: null,
+          during,
+          waitlist_position: waitlistPosition,
+          offer_expires_at: null,
+          joined_at: sql<Date>`now()`,
+        })
+        .where("match_players.status", "=", "CANCELLED")
+    )
+    .returning("user_id")
+    .executeTakeFirst();
 
-  return { status: "WAITLISTED", position };
+  if (!row) throw Errors.alreadyInMatch();
 }

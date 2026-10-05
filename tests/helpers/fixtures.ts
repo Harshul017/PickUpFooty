@@ -160,3 +160,27 @@ export async function expireNow(db: Kysely<DB>, requestId: string) {
     .where("id", "=", requestId)
     .execute();
 }
+
+/**
+ * Simulate a player leaving a match (the leave endpoint isn't built yet):
+ * their row becomes CANCELLED and, if they held a spot, it's freed.
+ */
+export async function leaveMatch(db: Kysely<DB>, matchId: string, userId: string) {
+  await db.transaction().execute(async (trx) => {
+    const left = await trx
+      .updateTable("match_players")
+      .set({ status: "CANCELLED", waitlist_position: null })
+      .where("match_id", "=", matchId)
+      .where("user_id", "=", userId)
+      .returning("during")
+      .executeTakeFirstOrThrow();
+    // Only JOINED rows carry `during`.
+    if (left.during !== null) {
+      await trx
+        .updateTable("matches")
+        .set({ filled: (eb) => eb("filled", "-", 1) })
+        .where("id", "=", matchId)
+        .execute();
+    }
+  });
+}

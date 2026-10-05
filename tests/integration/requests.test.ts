@@ -9,6 +9,7 @@ import {
   fillMatch,
   getMatchState,
   getRequest,
+  leaveMatch,
 } from "../helpers/fixtures.js";
 
 type RequestsService = typeof import("../../src/modules/requests/service.js");
@@ -298,6 +299,22 @@ describe("join requests", () => {
 
       expect(await getMatchState(db, match.id)).toEqual(before);
       expect((await getRequest(db, request.id)).status).toBe("PENDING");
+    });
+
+    it("lets a player who left the match be accepted again", async () => {
+      const { host, player, match } = await setup();
+      const first = await svc.createRequest({ matchId: match.id, userId: player.id });
+      await svc.acceptRequest(first.id, host.id);
+      await leaveMatch(db, match.id, player.id);
+
+      const second = await svc.createRequest({ matchId: match.id, userId: player.id });
+      expect(await svc.acceptRequest(second.id, host.id)).toEqual({ status: "JOINED" });
+
+      const state = await getMatchState(db, match.id);
+      expect(state.joinedCount).toBe(state.filled);
+      expect(state.players.filter((p) => p.user_id === player.id)).toEqual([
+        expect.objectContaining({ status: "JOINED" }),
+      ]);
     });
 
     it("is host only", async () => {
