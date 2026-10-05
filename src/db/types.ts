@@ -5,6 +5,10 @@ export type TsRange = string;
 
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
+// A timestamp with a database default (e.g. now()). GeneratedTimestamp
+// would nest one ColumnType in another and break explicit inserts.
+export type GeneratedTimestamp = ColumnType<Date, Date | string | undefined, Date | string>;
+
 export interface UsersTable {
   id: Generated<string>;
   name: string;
@@ -15,7 +19,7 @@ export interface UsersTable {
   area: string | null;
   preferred_position: "GK" | "DEF" | "MID" | "FWD" | null;
   preferred_foot: "LEFT" | "RIGHT" | "BOTH" | null;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface PlayerRatingsTable {
@@ -23,7 +27,7 @@ export interface PlayerRatingsTable {
   rating: number;
   matches_played: Generated<number>;
   is_provisional: Generated<boolean>;
-  updated_at: Generated<Timestamp>;
+  updated_at: GeneratedTimestamp;
 }
 
 export interface FormatsTable {
@@ -80,7 +84,7 @@ export interface MatchesTable {
   status: "OPEN" | "FULL" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
   during: TsRange;
   version: Generated<number>;
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export type MatchPlayerStatus =
@@ -99,7 +103,7 @@ export interface MatchPlayersTable {
   during: TsRange | null;
   waitlist_position: number | null;
   offer_expires_at: Timestamp | null;
-  joined_at: Generated<Timestamp>;
+  joined_at: GeneratedTimestamp;
 }
 
 export interface JoinRequestsTable {
@@ -108,7 +112,7 @@ export interface JoinRequestsTable {
   user_id: string;
   note: string | null;
   status: "PENDING" | "ACCEPTED" | "REJECTED" | "EXPIRED" | "WITHDRAWN";
-  requested_at: Generated<Timestamp>;
+  requested_at: GeneratedTimestamp;
   expires_at: Timestamp;
   decided_at: Timestamp | null;
 }
@@ -126,7 +130,7 @@ export interface ConductEventsTable {
   user_id: string;
   match_id: string | null;
   type: "LATE_CANCEL" | "NO_SHOW" | "LATE_ARRIVAL" | "ORGANIZER_LATE_CANCEL";
-  created_at: Generated<Timestamp>;
+  created_at: GeneratedTimestamp;
 }
 
 export interface DemeritsTable {
