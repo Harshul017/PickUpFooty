@@ -98,10 +98,10 @@ doc's milestones section for the full schedule.
 | GET | `/api/v1/pitches/:id/availability?date=` | — | booked ranges for that day |
 | POST | `/api/v1/matches` | Player | rejects on pitch clash (409) |
 | GET | `/api/v1/matches?cursor=&format=&limit=` | — | keyset pagination |
-| POST | `/api/v1/matches/:id/join` | Player | 200 joined, 202 waitlisted |
-| POST | `/api/v1/matches/:id/requests` | Player | APPROVAL matches only; optional `note` (max 280); 409 if one is already pending |
+| POST | `/api/v1/matches/:id/join` | Player | 200 joined, 202 waitlisted; 403 `BANNED` or `RATING_OUT_OF_RANGE` |
+| POST | `/api/v1/matches/:id/requests` | Player | APPROVAL matches only; optional `note` (max 280); 409 if one is already pending; 403 `BANNED` or `RATING_OUT_OF_RANGE` |
 | GET | `/api/v1/matches/:id/requests` | Host | pending, unexpired requests, oldest first, with name and rating |
-| POST | `/api/v1/requests/:id/accept` | Host | 200 joined, 202 waitlisted; 409 if already decided or expired |
+| POST | `/api/v1/requests/:id/accept` | Host | 200 joined, 202 waitlisted; 409 if already decided or expired; 403 `BANNED` or `RATING_OUT_OF_RANGE` if the player is no longer eligible |
 | POST | `/api/v1/requests/:id/reject` | Host | 409 if already decided or expired |
 | POST | `/api/v1/requests/:id/withdraw` | Requester | 409 if already decided or expired |
 
