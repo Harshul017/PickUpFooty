@@ -1,0 +1,21 @@
+{
+  "name": "pickupfooty",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Harshul017/PickUpFooty.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/Harshul017/PickUpFooty/issues"
+  },
+  "homepage": "https://github.com/Harshul017/PickUpFooty#readme",
+  "type": "module"
+}
