@@ -75,10 +75,10 @@ export async function takeSpotOrWaitlist(
 }
 
 async function waitlist(trx: Kysely<DB>, matchId: string, userId: string): Promise<JoinResult> {
-  // Counting and then inserting is a race: two requests can both count
-  // 5 and both take position 6. Locking the match row makes concurrent
-  // waitlist inserts for the same match run one at a time, so each one
-  // sees the previous one's row. Other matches are unaffected.
+  // Reading the last position and then inserting is a race: two requests
+  // can both read 5 and both take position 6. Locking the match row makes
+  // concurrent waitlist inserts for the same match run one at a time, so
+  // each one sees the previous one's row. Other matches are unaffected.
   const match = await trx
     .selectFrom("matches")
     .select("status")
@@ -92,14 +92,16 @@ async function waitlist(trx: Kysely<DB>, matchId: string, userId: string): Promi
     throw Errors.matchNotOpen();
   }
 
-  const { count } = await trx
+  // MAX, not COUNT: once someone leaves the waitlist the positions have a
+  // gap, and COUNT + 1 would hand out a position that's still taken.
+  const { last } = await trx
     .selectFrom("match_players")
-    .select((eb) => eb.fn.countAll<number>().as("count"))
+    .select((eb) => eb.fn.max("waitlist_position").as("last"))
     .where("match_id", "=", matchId)
     .where("status", "=", "WAITLISTED")
     .executeTakeFirstOrThrow();
 
-  const position = Number(count) + 1;
+  const position = (last ?? 0) + 1;
 
   await trx
     .insertInto("match_players")
