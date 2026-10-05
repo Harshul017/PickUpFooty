@@ -21,5 +21,11 @@ export const Errors = {
     new AppError(409, "PLAYER_OVERLAP", message),
   alreadyInMatch: () => new AppError(409, "ALREADY_IN_MATCH", "Already joined or waitlisted in this match"),
   matchNotOpen: () => new AppError(409, "MATCH_NOT_OPEN", "This match is no longer open"),
+  requestsClosed: () =>
+    new AppError(409, "REQUESTS_CLOSED", "Join requests close 90 minutes before kickoff"),
+  requestAlreadyPending: () =>
+    new AppError(409, "REQUEST_ALREADY_PENDING", "You already have a pending request for this match"),
+  requestNotPending: () =>
+    new AppError(409, "REQUEST_NOT_PENDING", "Request already decided or expired"),
   banned: (until: Date) => new AppError(403, "BANNED", `You are banned until ${until.toISOString()}`),
 };
