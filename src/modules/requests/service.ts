@@ -108,8 +108,8 @@ export async function listPendingRequests(matchId: string, hostId: string) {
 /**
  * Accept a request and seat the player in one transaction: the request
  * becomes ACCEPTED, the player takes a spot (or the waitlist if the match
- * filled meanwhile), and their other PENDING requests for overlapping
- * times are withdrawn. Any failure rolls all of it back.
+ * filled meanwhile), and, if they got a spot, their other PENDING requests
+ * for overlapping times are withdrawn. Any failure rolls all of it back.
  */
 export async function acceptRequest(requestId: string, hostId: string): Promise<JoinResult> {
   return db.transaction().execute(async (trx) => {
@@ -153,23 +153,27 @@ export async function acceptRequest(requestId: string, hostId: string): Promise<
       throw err;
     }
 
-    // A player can't hold overlapping matches, so their other pending
-    // requests for overlapping times go away with this accept.
-    await trx
-      .updateTable("join_requests")
-      .set({ status: "WITHDRAWN", decided_at: sql<Date>`now()` })
-      .where("user_id", "=", accepted.user_id)
-      .where("status", "=", "PENDING")
-      .where("id", "<>", requestId)
-      .where("match_id", "in", (eb) =>
-        eb
-          .selectFrom("matches")
-          .select("id")
-          .where(
-            sql<boolean>`during && (SELECT during FROM matches WHERE id = ${accepted.match_id})`
-          )
-      )
-      .execute();
+    // A player can't hold overlapping matches, so once they hold this one
+    // their other pending requests for overlapping times go away. A
+    // waitlisted player holds nothing yet, so their other requests stay.
+    if (result.status === "JOINED") {
+      await trx
+        .updateTable("join_requests")
+        .set({ status: "WITHDRAWN", decided_at: sql<Date>`now()` })
+        .where("user_id", "=", accepted.user_id)
+        .where("status", "=", "PENDING")
+        .where("id", "<>", requestId)
+        .where("match_id", "in", (eb) =>
+          eb
+            .selectFrom("matches")
+            .select("id")
+            .where(
+              sql<boolean>`during && (SELECT during FROM matches WHERE id = ${accepted.match_id})`
+            )
+        )
+        .execute();
+
+    }
 
     return result;
   });

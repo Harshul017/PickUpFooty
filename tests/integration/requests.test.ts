@@ -228,6 +228,26 @@ describe("join requests", () => {
       expect((await getRequest(db, request.id)).status).toBe("ACCEPTED");
     });
 
+    it("keeps the player's other pending requests when they are only waitlisted", async () => {
+      const player = await createUser(db);
+      const hostA = await createUser(db);
+      const hostB = await createUser(db);
+      const startsAt = new Date(Date.now() + 5 * 60 * MIN);
+      const matchA = await createMatch(db, { hostId: hostA.id, startsAt, capacity: 8 });
+      const matchB = await createMatch(db, {
+        hostId: hostB.id,
+        startsAt: new Date(startsAt.getTime() + 30 * MIN),
+      });
+      const reqA = await svc.createRequest({ matchId: matchA.id, userId: player.id });
+      const reqB = await svc.createRequest({ matchId: matchB.id, userId: player.id });
+      await fillMatch(db, matchA.id, 0);
+
+      const result = await svc.acceptRequest(reqA.id, hostA.id);
+
+      expect(result.status).toBe("WAITLISTED");
+      expect((await getRequest(db, reqB.id)).status).toBe("PENDING");
+    });
+
     it("withdraws the player's other pending requests that overlap in time", async () => {
       const player = await createUser(db);
       const hostA = await createUser(db);
