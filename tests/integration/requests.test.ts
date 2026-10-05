@@ -301,6 +301,68 @@ describe("join requests", () => {
       expect((await getRequest(db, request.id)).status).toBe("PENDING");
     });
 
+    it("rejects a player who was banned after requesting, leaving the request PENDING", async () => {
+      const { host, player, match } = await setup();
+      const request = await svc.createRequest({ matchId: match.id, userId: player.id });
+      await db
+        .insertInto("bans")
+        .values({
+          user_id: player.id,
+          starts_at: new Date(),
+          ends_at: new Date(Date.now() + 7 * 24 * 60 * MIN),
+          reason: "test",
+        })
+        .execute();
+      const before = await getMatchState(db, match.id);
+
+      const err = await svc.acceptRequest(request.id, host.id).catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 403, code: "BANNED" });
+      expect((err as Error).message).toMatch(/^This player is banned until /);
+
+      expect(await getMatchState(db, match.id)).toEqual(before);
+      expect((await getRequest(db, request.id)).status).toBe("PENDING");
+    });
+
+    it("ignores bans that have already ended", async () => {
+      const { host, player, match } = await setup();
+      const request = await svc.createRequest({ matchId: match.id, userId: player.id });
+      await db
+        .insertInto("bans")
+        .values({
+          user_id: player.id,
+          starts_at: new Date(Date.now() - 8 * 24 * 60 * MIN),
+          ends_at: new Date(Date.now() - 24 * 60 * MIN),
+          reason: "old",
+        })
+        .execute();
+      expect(await svc.acceptRequest(request.id, host.id)).toEqual({ status: "JOINED" });
+    });
+
+    it("rejects a player outside the match's rating range with 403", async () => {
+      const host = await createUser(db);
+      const match = await createMatch(db, { hostId: host.id, minRating: 1400 });
+      const player = await createUser(db, { rating: 1300 });
+      const request = await svc.createRequest({ matchId: match.id, userId: player.id });
+      const before = await getMatchState(db, match.id);
+
+      await expect(svc.acceptRequest(request.id, host.id)).rejects.toMatchObject({
+        status: 403,
+        code: "RATING_OUT_OF_RANGE",
+        message: "This player's rating (1300) is outside this match's range (1400 or higher)",
+      });
+
+      expect(await getMatchState(db, match.id)).toEqual(before);
+      expect((await getRequest(db, request.id)).status).toBe("PENDING");
+    });
+
+    it("accepts a player inside the rating range", async () => {
+      const host = await createUser(db);
+      const match = await createMatch(db, { hostId: host.id, minRating: 1200, maxRating: 1400 });
+      const player = await createUser(db, { rating: 1300 });
+      const request = await svc.createRequest({ matchId: match.id, userId: player.id });
+      expect(await svc.acceptRequest(request.id, host.id)).toEqual({ status: "JOINED" });
+    });
+
     it("lets a player who left the match be accepted again", async () => {
       const { host, player, match } = await setup();
       const first = await svc.createRequest({ matchId: match.id, userId: player.id });

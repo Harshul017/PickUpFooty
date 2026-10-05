@@ -3,6 +3,7 @@ import { db } from "../../lib/db.js";
 import { Errors } from "../../lib/errors.js";
 import { isBeforeJoinCutoff } from "../../lib/time.js";
 import { assertNotBanned } from "../discipline/service.js";
+import { assertRatingInRange } from "./eligibility.js";
 import { takeSpotOrWaitlist, type JoinResult } from "./spots.js";
 
 export type { JoinResult } from "./spots.js";
@@ -25,6 +26,7 @@ export async function joinOpenMatch(matchId: string, userId: string): Promise<Jo
   if (match.join_mode !== "OPEN") {
     throw Errors.badRequest("This match requires a join request, not a direct join");
   }
+  await assertRatingInRange(db, match, userId, "self");
 
   const startsAt = await lowerBoundOf(matchId);
   const tryJoin = isBeforeJoinCutoff(startsAt);

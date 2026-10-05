@@ -4,7 +4,8 @@ import { db } from "../../lib/db.js";
 import { AppError, Errors } from "../../lib/errors.js";
 import { isPgError, PG_UNIQUE_VIOLATION } from "../../lib/pg.js";
 import { isBeforeJoinCutoff, now, requestExpiryAt } from "../../lib/time.js";
-import { assertNotBanned } from "../discipline/service.js";
+import { assertNotBanned, findActiveBan } from "../discipline/service.js";
+import { assertRatingInRange } from "../matches/eligibility.js";
 import { takeSpotOrWaitlist, type JoinResult } from "../matches/spots.js";
 
 /**
@@ -140,6 +141,13 @@ export async function acceptRequest(requestId: string, hostId: string): Promise<
       .executeTakeFirst();
     if (!accepted) throw Errors.requestNotPending();
 
+    // The player was eligible when they asked, but a ban or a rating change
+    // since then still blocks them. Throwing rolls back the ACCEPTED status,
+    // so the request stays PENDING and the host can reject it.
+    const bannedUntil = await findActiveBan(accepted.user_id, trx);
+    if (bannedUntil) throw Errors.playerBanned(bannedUntil);
+    await assertRatingInRange(trx, request, accepted.user_id, "player");
+
     let result: JoinResult;
     try {
       result = await takeSpotOrWaitlist(trx, accepted.match_id, accepted.user_id, {
@@ -227,7 +235,14 @@ async function findRequestWithHost(executor: Kysely<DB>, requestId: string) {
   const request = await executor
     .selectFrom("join_requests as jr")
     .innerJoin("matches as m", "m.id", "jr.match_id")
-    .select(["jr.id", "jr.user_id", "jr.match_id", "m.host_id"])
+    .select([
+      "jr.id",
+      "jr.user_id",
+      "jr.match_id",
+      "m.host_id",
+      "m.min_rating",
+      "m.max_rating",
+    ])
     .where("jr.id", "=", requestId)
     .executeTakeFirst();
   if (!request) throw Errors.notFound("Request");

@@ -43,6 +43,8 @@ export async function createMatch(
     durationMin?: number;
     capacity?: number;
     joinMode?: "OPEN" | "APPROVAL";
+    minRating?: number;
+    maxRating?: number;
   }
 ) {
   const venue = await db
@@ -72,8 +74,8 @@ export async function createMatch(
       capacity,
       filled: 1,
       join_mode: opts.joinMode ?? "APPROVAL",
-      min_rating: null,
-      max_rating: null,
+      min_rating: opts.minRating ?? null,
+      max_rating: opts.maxRating ?? null,
       status: "OPEN",
       during: sql<string>`${during}::tstzrange`,
     })

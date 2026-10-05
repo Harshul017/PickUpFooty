@@ -32,10 +32,45 @@ describe("joining a match", () => {
     await testDb?.stop();
   });
 
-  async function openMatch(opts: { capacity?: number } = {}) {
+  async function openMatch(
+    opts: { capacity?: number; minRating?: number; maxRating?: number } = {}
+  ) {
     const host = await createUser(db);
     return createMatch(db, { hostId: host.id, joinMode: "OPEN", ...opts });
   }
+
+  describe("rating range", () => {
+    it("rejects players below min_rating with 403 and takes no spot", async () => {
+      const match = await openMatch({ minRating: 1300, maxRating: 1500 });
+      const player = await createUser(db, { rating: 1150 });
+      const before = await getMatchState(db, match.id);
+
+      const err = await joinOpenMatch(match.id, player.id).catch((e: unknown) => e);
+      expect(err).toMatchObject({ status: 403, code: "RATING_OUT_OF_RANGE" });
+      expect((err as Error).message).toBe(
+        "Your rating (1150) is outside this match's range (1300–1500)"
+      );
+      expect(await getMatchState(db, match.id)).toEqual(before);
+    });
+
+    it("rejects players above max_rating", async () => {
+      const match = await openMatch({ maxRating: 1200 });
+      const player = await createUser(db, { rating: 1450 });
+      await expect(joinOpenMatch(match.id, player.id)).rejects.toMatchObject({
+        status: 403,
+        code: "RATING_OUT_OF_RANGE",
+        message: "Your rating (1450) is outside this match's range (1200 or lower)",
+      });
+    });
+
+    it("lets players inside the range join, bounds included", async () => {
+      const match = await openMatch({ minRating: 1150, maxRating: 1300 });
+      const atMin = await createUser(db, { rating: 1150 });
+      const atMax = await createUser(db, { rating: 1300 });
+      expect(await joinOpenMatch(match.id, atMin.id)).toEqual({ status: "JOINED" });
+      expect(await joinOpenMatch(match.id, atMax.id)).toEqual({ status: "JOINED" });
+    });
+  });
 
   describe("waitlist positions", () => {
     it("hands out the next position after the last one, even with gaps", async () => {

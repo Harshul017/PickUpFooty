@@ -28,4 +28,7 @@ export const Errors = {
   requestNotPending: () =>
     new AppError(409, "REQUEST_NOT_PENDING", "Request already decided or expired"),
   banned: (until: Date) => new AppError(403, "BANNED", `You are banned until ${until.toISOString()}`),
+  playerBanned: (until: Date) =>
+    new AppError(403, "BANNED", `This player is banned until ${until.toISOString()}`),
+  ratingOutOfRange: (message: string) => new AppError(403, "RATING_OUT_OF_RANGE", message),
 };
