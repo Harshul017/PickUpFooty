@@ -134,6 +134,7 @@ async function seat(
           during,
           waitlist_position: waitlistPosition,
           offer_expires_at: null,
+          // Intentional: a returning player counts as joining now.
           joined_at: sql<Date>`now()`,
         })
         .where("match_players.status", "=", "CANCELLED")
