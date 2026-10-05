@@ -1,164 +1,86 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
-import { Kysely, PostgresDialect, sql } from "kysely";
-import pg from "pg";
+import { randomUUID } from "crypto";
+import type { Kysely } from "kysely";
 import type { DB } from "../../src/db/types.js";
+import { startTestDatabase, type TestDatabase } from "../helpers/db.js";
+import { createMatch, createUser, getMatchState } from "../helpers/fixtures.js";
+
+type JoinModule = typeof import("../../src/modules/matches/join.js");
 
 /**
  * Proves the core claim of the design doc: with N spots and M > N
  * simultaneous join attempts, exactly N succeed and `matches.filled`
- * always equals the number of JOINED rows. Runs against a real, disposable
- * Postgres via Testcontainers, migrated the same way production is.
+ * always equals the number of JOINED rows. Runs the real join flow against
+ * a real, disposable Postgres migrated the same way production is.
  */
 describe("last spot concurrency", () => {
-  let container: StartedPostgreSqlContainer;
+  let testDb: TestDatabase;
   let db: Kysely<DB>;
+  let joinOpenMatch: JoinModule["joinOpenMatch"];
   let matchId: string;
-  const CAPACITY = 10;
+  let playerIds: string[];
+  const OPEN_SPOTS = 10;
   const ATTEMPTS = 200;
 
   beforeAll(async () => {
-    container = await new PostgreSqlContainer("postgres:16-alpine").start();
-    const pool = new pg.Pool({ connectionString: container.getConnectionUri() });
-    db = new Kysely<DB>({ dialect: new PostgresDialect({ pool }) });
+    testDb = await startTestDatabase();
+    ({ db } = await import("../../src/lib/db.js"));
+    ({ joinOpenMatch } = await import("../../src/modules/matches/join.js"));
 
-    await sql`CREATE EXTENSION IF NOT EXISTS "pgcrypto"`.execute(db);
-    await sql`CREATE EXTENSION IF NOT EXISTS "btree_gist"`.execute(db);
+    // The host holds one seat, so capacity is one more than the open spots.
+    const host = await createUser(db);
+    const match = await createMatch(db, {
+      hostId: host.id,
+      joinMode: "OPEN",
+      capacity: OPEN_SPOTS + 1,
+    });
+    matchId = match.id;
 
-    // Minimal inline schema for this test: just what the join flow touches.
-    await sql`
-      CREATE TABLE matches (
-        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-        pitch_id uuid NOT NULL DEFAULT gen_random_uuid(),
-        join_mode text NOT NULL DEFAULT 'OPEN',
-        status text NOT NULL DEFAULT 'OPEN',
-        capacity integer NOT NULL,
-        filled integer NOT NULL DEFAULT 0,
-        during tstzrange NOT NULL,
-        version integer NOT NULL DEFAULT 0,
-        CHECK (filled <= capacity)
+    const players = await db
+      .insertInto("users")
+      .values(
+        Array.from({ length: ATTEMPTS }, (_, i) => ({
+          name: `Racer ${i}`,
+          email: `${randomUUID()}@test.local`,
+          phone: null,
+          password_hash: "not-a-real-hash",
+          role: "PLAYER" as const,
+          area: null,
+          preferred_position: null,
+          preferred_foot: null,
+        }))
       )
-    `.execute(db);
-
-    await sql`
-      CREATE TABLE match_players (
-        match_id uuid NOT NULL REFERENCES matches(id),
-        user_id uuid NOT NULL DEFAULT gen_random_uuid(),
-        status text NOT NULL,
-        during tstzrange,
-        waitlist_position integer,
-        joined_at timestamptz NOT NULL DEFAULT now(),
-        PRIMARY KEY (match_id, user_id)
-      )
-    `.execute(db);
-
-    await sql`
-      ALTER TABLE match_players
-      ADD CONSTRAINT match_players_no_overlap
-      EXCLUDE USING gist (user_id WITH =, during WITH &&)
-      WHERE (status = 'JOINED')
-    `.execute(db);
-
-    await sql`CREATE TABLE bans (user_id uuid, ends_at timestamptz)`.execute(db);
-
-    const starts = new Date(Date.now() + 3 * 60 * 60 * 1000); // 3h from now
-    const ends = new Date(starts.getTime() + 60 * 60 * 1000);
-    const during = `[${starts.toISOString()},${ends.toISOString()})`;
-
-    const match = await db
-      .insertInto("matches")
-      .values({
-        pitch_id: crypto.randomUUID() as never,
-        join_mode: "OPEN",
-        status: "OPEN",
-        capacity: CAPACITY,
-        filled: 0,
-        during: sql<string>`${during}::tstzrange` as never,
-      } as never)
       .returning("id")
-      .executeTakeFirstOrThrow();
-
-    matchId = match.id as unknown as string;
-  }, 60_000);
+      .execute();
+    playerIds = players.map((p) => p.id);
+  });
 
   afterAll(async () => {
-    await db.destroy();
-    await container.stop();
+    await db?.destroy();
+    await testDb?.stop();
   });
 
-  it("lets exactly CAPACITY players join out of many simultaneous attempts", async () => {
-    const attempts = Array.from({ length: ATTEMPTS }, () => attemptJoin(db, matchId));
-    const results = await Promise.allSettled(attempts);
+  it("lets exactly OPEN_SPOTS players join out of many simultaneous attempts", async () => {
+    const results = await Promise.allSettled(
+      playerIds.map((id) => joinOpenMatch(matchId, id))
+    );
 
-    const joined = results.filter(
-      (r) => r.status === "fulfilled" && r.value === "JOINED"
-    ).length;
-    const waitlisted = results.filter(
-      (r) => r.status === "fulfilled" && r.value === "WAITLISTED"
-    ).length;
+    const failures = results.filter((r) => r.status === "rejected");
+    expect(failures).toEqual([]);
 
-    expect(joined).toBe(CAPACITY);
-    expect(joined + waitlisted).toBe(ATTEMPTS);
+    const values = results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    const joined = values.filter((v) => v.status === "JOINED").length;
+    const positions = values.flatMap((v) => (v.status === "WAITLISTED" ? [v.position] : []));
 
-    const row = await db
-      .selectFrom("matches")
-      .select(["filled", "capacity"])
-      .where("id", "=", matchId as never)
-      .executeTakeFirstOrThrow();
-    expect(row.filled).toBe(CAPACITY);
-    expect(row.filled).toBeLessThanOrEqual(row.capacity);
+    expect(joined).toBe(OPEN_SPOTS);
+    expect(joined + positions.length).toBe(ATTEMPTS);
+    // The waitlist is a clean 1..N line: no shared or skipped positions.
+    expect([...positions].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: ATTEMPTS - OPEN_SPOTS }, (_, i) => i + 1)
+    );
 
-    const joinedRows = await db
-      .selectFrom("match_players")
-      .select((eb) => eb.fn.countAll<number>().as("count"))
-      .where("match_id", "=", matchId as never)
-      .where("status", "=", "JOINED" as never)
-      .executeTakeFirstOrThrow();
-    expect(Number(joinedRows.count)).toBe(row.filled);
+    const state = await getMatchState(db, matchId);
+    expect(state.filled).toBe(state.capacity);
+    expect(state.joinedCount).toBe(state.filled);
   });
 });
-
-/**
- * Mirrors src/modules/matches/join.ts's core two-step transaction, kept
- * inline so this test has no dependency on env-configured app wiring.
- */
-async function attemptJoin(db: Kysely<DB>, matchId: string): Promise<"JOINED" | "WAITLISTED"> {
-  const userId = crypto.randomUUID();
-
-  const outcome = await db.transaction().execute(async (trx) => {
-    const claimed = await trx
-      .updateTable("matches")
-      .set({ filled: (eb) => eb("filled", "+", 1), version: (eb) => eb("version", "+", 1) })
-      .where("id", "=", matchId as never)
-      .where("status", "=", "OPEN")
-      .where((eb) => eb("filled", "<", eb.ref("capacity")))
-      .returning("id")
-      .executeTakeFirst();
-
-    if (!claimed) return "FULL" as const;
-
-    await trx
-      .insertInto("match_players")
-      .values({
-        match_id: matchId as never,
-        user_id: userId as never,
-        status: "JOINED" as never,
-        during: sql`(SELECT during FROM matches WHERE id = ${matchId}::uuid)` as never,
-      } as never)
-      .execute();
-
-    return "JOINED" as const;
-  });
-
-  if (outcome === "JOINED") return "JOINED";
-
-  await db
-    .insertInto("match_players")
-    .values({
-      match_id: matchId as never,
-      user_id: userId as never,
-      status: "WAITLISTED" as never,
-    } as never)
-    .execute();
-  return "WAITLISTED";
-}
