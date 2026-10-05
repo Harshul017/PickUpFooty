@@ -13,12 +13,14 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+export const migrationsFolder = path.join(__dirname, "migrations");
+
 /**
  * Kysely's built-in FileMigrationProvider imports files by their raw path,
  * which breaks on Windows ("C:\..." isn't a valid import URL). This version
  * converts each path to a file:// URL first, so it works on every OS.
  */
-class CrossPlatformMigrationProvider implements MigrationProvider {
+export class CrossPlatformMigrationProvider implements MigrationProvider {
   constructor(private readonly folder: string) {}
 
   async getMigrations(): Promise<Record<string, Migration>> {
@@ -35,18 +37,25 @@ class CrossPlatformMigrationProvider implements MigrationProvider {
   }
 }
 
-const db = new Kysely<unknown>({
-  dialect: new PostgresDialect({
-    pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }),
-  }),
-});
-
-const migrator = new Migrator({
-  db,
-  provider: new CrossPlatformMigrationProvider(path.join(__dirname, "migrations")),
-});
+/**
+ * The project's migrator for any database handle. Exported so tests can
+ * run the real migrations against a throwaway Postgres.
+ */
+export function createMigrator(db: Kysely<unknown>): Migrator {
+  return new Migrator({
+    db,
+    provider: new CrossPlatformMigrationProvider(migrationsFolder),
+  });
+}
 
 async function main() {
+  const db = new Kysely<unknown>({
+    dialect: new PostgresDialect({
+      pool: new pg.Pool({ connectionString: process.env.DATABASE_URL }),
+    }),
+  });
+  const migrator = createMigrator(db);
+
   const direction = process.argv[2] === "down" ? "down" : "up";
   const { error, results } =
     direction === "up" ? await migrator.migrateToLatest() : await migrator.migrateDown();
@@ -61,4 +70,17 @@ async function main() {
   }
 }
 
-main();
+// Only run when executed as a script (`npm run migrate`), not when imported.
+// Windows paths are case-insensitive ("c:\" vs "C:\"), so compare loosely there.
+function isEntryPoint(): boolean {
+  if (!process.argv[1]) return false;
+  const invoked = path.resolve(process.argv[1]);
+  const self = fileURLToPath(import.meta.url);
+  return process.platform === "win32"
+    ? invoked.toLowerCase() === self.toLowerCase()
+    : invoked === self;
+}
+
+if (isEntryPoint()) {
+  main();
+}
