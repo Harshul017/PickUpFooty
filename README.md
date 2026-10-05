@@ -99,6 +99,11 @@ doc's milestones section for the full schedule.
 | POST | `/api/v1/matches` | Player | rejects on pitch clash (409) |
 | GET | `/api/v1/matches?cursor=&format=&limit=` | — | keyset pagination |
 | POST | `/api/v1/matches/:id/join` | Player | 200 joined, 202 waitlisted |
+| POST | `/api/v1/matches/:id/requests` | Player | APPROVAL matches only; optional `note` (max 280); 409 if one is already pending |
+| GET | `/api/v1/matches/:id/requests` | Host | pending, unexpired requests, oldest first, with name and rating |
+| POST | `/api/v1/requests/:id/accept` | Host | 200 joined, 202 waitlisted; 409 if already decided or expired |
+| POST | `/api/v1/requests/:id/reject` | Host | 409 if already decided or expired |
+| POST | `/api/v1/requests/:id/withdraw` | Requester | 409 if already decided or expired |
 
 More endpoints land as each week's features are built — see the design
 doc's API section for the full planned surface.
