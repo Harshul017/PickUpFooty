@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { pinoHttp } from "pino-http";
+import { ZodError } from "zod";
 import { logger } from "./lib/logger.js";
 import { AppError } from "./lib/errors.js";
 import { authRouter } from "./modules/auth/routes.js";
@@ -32,6 +33,12 @@ export function buildApp() {
     (err: unknown, req: express.Request, res: express.Response, _next: express.NextFunction) => {
       if (err instanceof AppError) {
         return res.status(err.status).json({ code: err.code, message: err.message });
+      }
+      if (err instanceof ZodError) {
+        const message = err.issues
+          .map((i) => (i.path.length ? `${i.path.join(".")}: ${i.message}` : i.message))
+          .join("; ");
+        return res.status(400).json({ code: "VALIDATION_ERROR", message });
       }
       req.log?.error({ err }, "unhandled error");
       res.status(500).json({ code: "INTERNAL_ERROR", message: "Something went wrong" });
