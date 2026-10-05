@@ -128,6 +128,31 @@ describe("join requests", () => {
       ).rejects.toMatchObject({ status: 403, code: "BANNED" });
     });
 
+    it("rejects players outside the match's rating range with 403", async () => {
+      const host = await createUser(db);
+      const match = await createMatch(db, { hostId: host.id, minRating: 1200, maxRating: 1400 });
+      const low = await createUser(db, { rating: 1150 });
+      const high = await createUser(db, { rating: 1450 });
+
+      await expect(
+        svc.createRequest({ matchId: match.id, userId: low.id })
+      ).rejects.toMatchObject({
+        status: 403,
+        code: "RATING_OUT_OF_RANGE",
+        message: "Your rating (1150) is outside this match's range (1200–1400)",
+      });
+      await expect(
+        svc.createRequest({ matchId: match.id, userId: high.id })
+      ).rejects.toMatchObject({ status: 403, code: "RATING_OUT_OF_RANGE" });
+
+      const stored = await db
+        .selectFrom("join_requests")
+        .select("id")
+        .where("match_id", "=", match.id)
+        .execute();
+      expect(stored).toEqual([]);
+    });
+
     it("returns 404 for an unknown match", async () => {
       const player = await createUser(db);
       await expect(
@@ -338,11 +363,13 @@ describe("join requests", () => {
       expect(await svc.acceptRequest(request.id, host.id)).toEqual({ status: "JOINED" });
     });
 
-    it("rejects a player outside the match's rating range with 403", async () => {
+    it("rejects a player who fell outside the rating range after requesting", async () => {
       const host = await createUser(db);
-      const match = await createMatch(db, { hostId: host.id, minRating: 1400 });
+      const match = await createMatch(db, { hostId: host.id, minRating: 1200 });
       const player = await createUser(db, { rating: 1300 });
       const request = await svc.createRequest({ matchId: match.id, userId: player.id });
+      // The range moves while the request is pending.
+      await db.updateTable("matches").set({ min_rating: 1400 }).where("id", "=", match.id).execute();
       const before = await getMatchState(db, match.id);
 
       await expect(svc.acceptRequest(request.id, host.id)).rejects.toMatchObject({

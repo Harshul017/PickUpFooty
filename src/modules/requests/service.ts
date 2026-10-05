@@ -23,7 +23,14 @@ export async function createRequest(input: { matchId: string; userId: string; no
 
   const match = await db
     .selectFrom("matches")
-    .select(["id", "join_mode", "status", sql<string>`lower(during)`.as("starts_at")])
+    .select([
+      "id",
+      "join_mode",
+      "status",
+      "min_rating",
+      "max_rating",
+      sql<string>`lower(during)`.as("starts_at"),
+    ])
     .where("id", "=", input.matchId)
     .executeTakeFirst();
   if (!match) throw Errors.notFound("Match");
@@ -31,6 +38,8 @@ export async function createRequest(input: { matchId: string; userId: string; no
     throw Errors.badRequest("This match is open to join directly; use /join instead");
   }
   if (match.status !== "OPEN") throw Errors.matchNotOpen();
+  // Checked again at accept, since a rating can change while it's pending.
+  await assertRatingInRange(db, match, input.userId, "self");
 
   const requestedAt = now();
   const startsAt = new Date(match.starts_at);
