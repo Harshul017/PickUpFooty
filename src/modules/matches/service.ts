@@ -1,6 +1,7 @@
 import { sql } from "kysely";
 import { db } from "../../lib/db.js";
 import { Errors } from "../../lib/errors.js";
+import { isPgError, PG_EXCLUSION_VIOLATION } from "../../lib/pg.js";
 import { toTsRange, validCreationWindow } from "../../lib/time.js";
 
 export interface CreateMatchInput {
@@ -15,9 +16,6 @@ export interface CreateMatchInput {
   minRating?: number;
   maxRating?: number;
 }
-
-// Postgres unique_violation / exclusion_violation SQLSTATE.
-const PG_EXCLUSION_VIOLATION = "23P01";
 
 export async function createMatch(input: CreateMatchInput) {
   if (!validCreationWindow(input.startsAt)) {
@@ -98,10 +96,6 @@ export async function createMatch(input: CreateMatchInput) {
     }
     throw err;
   }
-}
-
-function isPgError(err: unknown): err is { code: string; constraint?: string } {
-  return typeof err === "object" && err !== null && "code" in err;
 }
 
 export async function listUpcomingMatches(params: {

@@ -17,6 +17,9 @@ export const Errors = {
   conflict: (message: string) => new AppError(409, "CONFLICT", message),
   matchFull: () => new AppError(409, "MATCH_FULL", "This match is already full"),
   pitchClash: () => new AppError(409, "PITCH_CLASH", "That pitch is already booked for an overlapping time"),
-  playerOverlap: () => new AppError(409, "PLAYER_OVERLAP", "You are already in another match at an overlapping time"),
+  playerOverlap: (message = "You are already in another match at an overlapping time") =>
+    new AppError(409, "PLAYER_OVERLAP", message),
+  alreadyInMatch: () => new AppError(409, "ALREADY_IN_MATCH", "Already joined or waitlisted in this match"),
+  matchNotOpen: () => new AppError(409, "MATCH_NOT_OPEN", "This match is no longer open"),
   banned: (until: Date) => new AppError(403, "BANNED", `You are banned until ${until.toISOString()}`),
 };
