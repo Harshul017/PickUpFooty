@@ -6,8 +6,7 @@ from the real result. Built as a backend-engineering showcase — the
 interesting parts are enforced by PostgreSQL itself, not by application
 code that could be bypassed.
 
-Full design doc: see `docs/design.md` (or the original Claude Docs link
-if you were handed one).
+Full design doc: see `docs/design.md` 
 
 ## What's actually enforced by the database, not just the app
 
