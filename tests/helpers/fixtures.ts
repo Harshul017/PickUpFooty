@@ -266,3 +266,28 @@ export async function expireOfferNow(db: Kysely<DB>, matchId: string, userId: st
     .where("status", "=", "OFFERED")
     .execute();
 }
+
+/** Put a seated player on a side, without going through the lineup rules. */
+export async function setTeam(
+  db: Kysely<DB>,
+  matchId: string,
+  userId: string,
+  team: "A" | "B",
+  slotCode: string
+) {
+  await db
+    .updateTable("match_players")
+    .set({ team, slot_code: slotCode })
+    .where("match_id", "=", matchId)
+    .where("user_id", "=", userId)
+    .execute();
+}
+
+/** Everything recorded about how a match went. */
+export async function getStats(db: Kysely<DB>, matchId: string) {
+  return db
+    .selectFrom("player_match_stats")
+    .select(["user_id", "goals", "assists", "clean_sheet"])
+    .where("match_id", "=", matchId)
+    .execute();
+}

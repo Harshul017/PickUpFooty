@@ -182,3 +182,63 @@ export async function getDisciplineSummary(userId: string): Promise<DisciplineSu
     })),
   };
 }
+
+/**
+ * Record a no-show and charge for it.
+ *
+ * A no-show skips the warning rung entirely: not turning up is worse than
+ * pulling out late, because nobody got the chance to replace you. The
+ * ladder still decides whether the point tips into a ban, so a player
+ * already carrying demerits is banned here rather than on some later
+ * offence.
+ *
+ * Called at finalisation, never at submission, so a disputed result can't
+ * leave a penalty behind after being overturned.
+ */
+export async function recordNoShow(
+  trx: Kysely<DB>,
+  userId: string,
+  matchId: string
+): Promise<AppliedPenalty> {
+  const event = await trx
+    .insertInto("conduct_events")
+    .values({ user_id: userId, match_id: matchId, type: "NO_SHOW" })
+    .returning("id")
+    .executeTakeFirstOrThrow();
+
+  const { points } = await trx
+    .selectFrom("demerits")
+    .select(sql<string>`coalesce(sum(points), 0)`.as("points"))
+    .where("user_id", "=", userId)
+    .where("expires_at", ">", sql<Date>`now()`)
+    .executeTakeFirstOrThrow();
+
+  await trx
+    .insertInto("demerits")
+    .values({
+      user_id: userId,
+      conduct_event_id: event.id,
+      points: 1,
+      expires_at: sql<Date>`now() + make_interval(days => ${RULES.DEMERIT_EXPIRY_DAYS})`,
+    })
+    .execute();
+
+  // One point is already on the board from this no-show; the ban comes
+  // when the running total reaches two, same threshold as late cancels.
+  if (Number(points) + 1 < 2) {
+    return { kind: "DEMERIT", banEndsAt: null };
+  }
+
+  const ban = await trx
+    .insertInto("bans")
+    .values({
+      user_id: userId,
+      starts_at: sql<Date>`now()`,
+      ends_at: sql<Date>`now() + make_interval(days => ${RULES.BAN_DAYS})`,
+      reason: "Failing to turn up",
+    })
+    .returning("ends_at")
+    .executeTakeFirstOrThrow();
+
+  return { kind: "BAN", banEndsAt: new Date(ban.ends_at as unknown as string) };
+}

@@ -40,5 +40,26 @@ export const Errors = {
     new AppError(400, "UNKNOWN_SLOT", `This match's formation has no position "${slotCode}"`),
   noFormation: () =>
     new AppError(409, "NO_FORMATION", "This match has no formation set, so it has no positions yet"),
+  matchNotFinished: () =>
+    new AppError(409, "MATCH_NOT_FINISHED", "The result can only be submitted once the match has ended"),
+  resultAlreadySubmitted: () =>
+    new AppError(409, "RESULT_ALREADY_SUBMITTED", "A result has already been submitted for this match"),
+  goalsDoNotMatchScore: (team: string, goals: number, score: number) =>
+    new AppError(
+      400,
+      "GOALS_DO_NOT_MATCH_SCORE",
+      `Team ${team}'s players account for ${goals} goals but the score says ${score}`
+    ),
+  playerNotInMatch: (userId: string) =>
+    new AppError(400, "PLAYER_NOT_IN_MATCH", `${userId} did not play in this match`),
+  scorerHasNoTeam: (userId: string) =>
+    new AppError(400, "SCORER_HAS_NO_TEAM", `${userId} is credited with goals but is not on a team`),
+  noResultYet: () =>
+    new AppError(409, "NO_RESULT_YET", "No result has been submitted for this match yet"),
+  disputeWindowClosed: () =>
+    new AppError(409, "DISPUTE_WINDOW_CLOSED", "The result is final and can no longer be disputed"),
+  alreadyDisputed: () =>
+    new AppError(409, "ALREADY_DISPUTED", "You have already raised a dispute for this match"),
+  noOpenDispute: () => new AppError(409, "NO_OPEN_DISPUTE", "There is no open dispute to resolve"),
   ratingOutOfRange: (message: string) => new AppError(403, "RATING_OUT_OF_RANGE", message),
 };
