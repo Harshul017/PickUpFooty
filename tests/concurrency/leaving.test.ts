@@ -91,15 +91,18 @@ describe("leaving concurrency", () => {
       const before = await getMatchState(db, match.id);
       await Promise.all([leaveMatch(match.id, seated.id), expireOffer(match.id, first.id)]);
 
+      // Two spots came free at once — the seat and the lapsed offer — but
+      // only `second` was left waiting, since `first` is the one being
+      // thrown out rather than put back in the queue. So one spot is
+      // offered on and the other goes back to the match. Whichever call
+      // wins the race, the arithmetic is the same.
       const after = await getMatchState(db, match.id);
       expect(after.heldCount).toBe(after.filled);
-      // One seat was given up and one lapsed offer reclaimed, against two
-      // players still waiting, so both spots stay out on offer.
-      expect(after.filled).toBe(before.filled);
-      expect(after.offeredCount).toBeLessThanOrEqual(2);
-      expect(after.players.filter((p) => p.status === "OFFERED").map((p) => p.user_id)).not.toContain(
-        first.id
-      );
+      expect(after.filled).toBe(before.filled - 1);
+      expect(after.offeredCount).toBe(1);
+      expect(after.players.find((p) => p.user_id === second.id)?.status).toBe("OFFERED");
+      expect(after.players.find((p) => p.user_id === first.id)?.status).toBe("CANCELLED");
+      expect(after.waitlistedCount).toBe(0);
     }
   });
 
