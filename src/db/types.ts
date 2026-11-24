@@ -89,6 +89,9 @@ export interface MatchesTable {
 
 export type MatchPlayerStatus =
   | "JOINED"
+  // Holding a freed spot for a short window after a waitlist offer.
+  // Counts towards matches.filled exactly like JOINED.
+  | "OFFERED"
   | "WAITLISTED"
   | "CANCELLED"
   | "PLAYED"
