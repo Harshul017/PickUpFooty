@@ -9,6 +9,7 @@ import { authRouter } from "./modules/auth/routes.js";
 import { venuesRouter } from "./modules/venues/routes.js";
 import { matchesRouter } from "./modules/matches/routes.js";
 import { requestsRouter } from "./modules/requests/routes.js";
+import { disciplineRouter } from "./modules/discipline/routes.js";
 
 export function buildApp() {
   const app = express();
@@ -24,6 +25,7 @@ export function buildApp() {
   app.use("/api/v1", venuesRouter);
   app.use("/api/v1", matchesRouter);
   app.use("/api/v1", requestsRouter);
+  app.use("/api/v1", disciplineRouter);
 
   app.use((req, res) => {
     res.status(404).json({ code: "NOT_FOUND", message: `No route for ${req.method} ${req.path}` });

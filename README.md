@@ -20,6 +20,11 @@ Full design doc: see `docs/design.md`
   constraint is the last line of defense.
 - **No duplicate pending request.** A partial unique index allows only
   one `PENDING` join request per player per match.
+- **No spot held without a deadline.** A freed spot is offered to the next
+  player in line under an `OFFERED` row, and a check constraint ties that
+  state to an expiry: `(status = 'OFFERED') = (offer_expires_at IS NOT NULL)`.
+  So `matches.filled` always equals `JOINED + OFFERED`, and a spot can
+  never be quietly held forever.
 
 See `tests/concurrency/last-spot.test.ts` for a test that fires 200
 simultaneous join attempts at a 10-spot match and asserts exactly 10
@@ -78,11 +83,13 @@ load/             k6 load-test scripts (added in week 4)
 
 ## Status
 
-Week 1 of the 4-week plan: auth, venues/pitches/formats, and match
-creation + the open-join/waitlist flow are built and tested. Join
-requests with approval, cancellation and the penalty ladder, the pitch
-view, results/ratings, and the leaderboard are next — see the design
-doc's milestones section for the full schedule.
+Built and tested: accounts, venues and pitches, match creation, open joins
+with a waitlist, organizer approval of join requests with automatic
+expiry, and leaving a match with the late-cancellation penalty ladder and
+waitlist promotion.
+
+Next: lineups and results, then ratings and the weekly leaderboard. See
+the design doc for the full plan.
 
 ## API reference (current)
 
@@ -103,6 +110,10 @@ doc's milestones section for the full schedule.
 | POST | `/api/v1/requests/:id/accept` | Host | 200 joined, 202 waitlisted; 409 if already decided or expired; 403 `BANNED` or `RATING_OUT_OF_RANGE` if the player is no longer eligible |
 | POST | `/api/v1/requests/:id/reject` | Host | 409 if already decided or expired |
 | POST | `/api/v1/requests/:id/withdraw` | Requester | 409 if already decided or expired |
+| POST | `/api/v1/matches/:id/leave` | Player | returns any penalty applied; 400 for the host, 409 if not in the match |
+| POST | `/api/v1/matches/:id/waitlist/confirm` | Offered player | takes the spot; 409 `NO_LIVE_OFFER` once the window closes |
+| POST | `/api/v1/matches/:id/waitlist/decline` | Offered player | passes the spot to the next player in line |
+| GET | `/api/v1/me/discipline` | Player | own warnings, demerit points, active ban, and what the next late cancel would cost |
 
 More endpoints land as each week's features are built — see the design
 doc's API section for the full planned surface.

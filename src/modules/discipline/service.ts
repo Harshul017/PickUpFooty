@@ -110,3 +110,75 @@ export async function recordLateCancel(
 
   return { kind: decision.kind, banEndsAt: new Date(ban.ends_at as unknown as string) };
 }
+
+export interface DisciplineSummary {
+  lateCancels30d: number;
+  activeDemeritPoints: number;
+  ban: { endsAt: Date; reason: string } | null;
+  /** What a further late cancellation would cost, right now. */
+  nextLateCancel: PenaltyKind;
+  recentEvents: Array<{ type: string; matchId: string | null; at: Date }>;
+}
+
+/**
+ * Everything a player is entitled to know about their own record.
+ *
+ * `nextLateCancel` runs the ladder without recording anything, so the app
+ * can warn someone that this one costs them a ban before they tap the
+ * button. A penalty system people can't see coming just feels arbitrary.
+ */
+export async function getDisciplineSummary(userId: string): Promise<DisciplineSummary> {
+  const since = sql<Date>`now() - make_interval(days => ${RULES.DEMERIT_LOOKBACK_DAYS})`;
+
+  const { count } = await db
+    .selectFrom("conduct_events")
+    .select((eb) => eb.fn.countAll<string>().as("count"))
+    .where("user_id", "=", userId)
+    .where("type", "=", "LATE_CANCEL")
+    .where("created_at", ">", since)
+    .executeTakeFirstOrThrow();
+
+  const { points } = await db
+    .selectFrom("demerits")
+    .select(sql<string>`coalesce(sum(points), 0)`.as("points"))
+    .where("user_id", "=", userId)
+    .where("expires_at", ">", sql<Date>`now()`)
+    .executeTakeFirstOrThrow();
+
+  const ban = await db
+    .selectFrom("bans")
+    .select(["ends_at", "reason"])
+    .where("user_id", "=", userId)
+    .where("ends_at", ">", sql<Date>`now()`)
+    .orderBy("ends_at", "desc")
+    .executeTakeFirst();
+
+  const recentEvents = await db
+    .selectFrom("conduct_events")
+    .select(["type", "match_id", "created_at"])
+    .where("user_id", "=", userId)
+    .where("created_at", ">", since)
+    .orderBy("created_at", "desc")
+    .limit(20)
+    .execute();
+
+  const lateCancels30d = Number(count);
+  const activeDemeritPoints = Number(points);
+
+  return {
+    lateCancels30d,
+    activeDemeritPoints,
+    ban: ban
+      ? { endsAt: new Date(ban.ends_at as unknown as string), reason: ban.reason }
+      : null,
+    nextLateCancel: decidePenalty({
+      lateCancelsInWindow: lateCancels30d + 1,
+      activeDemeritPoints,
+    }).kind,
+    recentEvents: recentEvents.map((e) => ({
+      type: e.type,
+      matchId: e.match_id,
+      at: new Date(e.created_at as unknown as string),
+    })),
+  };
+}

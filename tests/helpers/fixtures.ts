@@ -255,3 +255,14 @@ export async function activeDemeritPoints(db: Kysely<DB>, userId: string): Promi
     .executeTakeFirstOrThrow();
   return Number(row.points);
 }
+
+/** Push a waitlist offer's deadline into the past, as if it lapsed. */
+export async function expireOfferNow(db: Kysely<DB>, matchId: string, userId: string) {
+  await db
+    .updateTable("match_players")
+    .set({ offer_expires_at: sql<Date>`now() - interval '1 second'` })
+    .where("match_id", "=", matchId)
+    .where("user_id", "=", userId)
+    .where("status", "=", "OFFERED")
+    .execute();
+}

@@ -4,6 +4,7 @@ import { requireAuth } from "../auth/middleware.js";
 import * as matchesService from "./service.js";
 import { joinOpenMatch } from "./join.js";
 import { leaveMatch } from "./leave.js";
+import { confirmOffer, declineOffer } from "./waitlist.js";
 import { waitlistOfferQueue, scheduleOnce } from "../../lib/queue.js";
 
 export const matchesRouter = Router();
@@ -81,20 +82,7 @@ matchesRouter.post("/matches/:id/leave", requireAuth, async (req, res, next) => 
     // the next player; the offer's own deadline is already enforced by
     // every query that reads it, so a lost job costs a notification and a
     // little delay, never correctness.
-    if (result.offer) {
-      const { userId, expiresAt } = result.offer;
-      try {
-        await scheduleOnce(
-          waitlistOfferQueue,
-          "expire-offer",
-          `${matchId}:${userId}:${expiresAt.getTime()}`,
-          { matchId, userId },
-          expiresAt.getTime() - Date.now()
-        );
-      } catch (err) {
-        req.log.error({ err, matchId, userId }, "failed to schedule waitlist offer expiry");
-      }
-    }
+    await scheduleOfferExpiry(req.log, matchId, result.offer);
 
     res.json({
       status: result.status,
@@ -104,6 +92,50 @@ matchesRouter.post("/matches/:id/leave", requireAuth, async (req, res, next) => 
       // Who got the spot is the organizer's business, not the leaver's.
       spotOffered: result.offer !== null,
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * Pass a freed spot to the next player in line and start their clock.
+ * Called after the transaction that created the offer has committed.
+ */
+async function scheduleOfferExpiry(
+  log: { error: (obj: unknown, msg: string) => void },
+  matchId: string,
+  offer: { userId: string; expiresAt: Date } | null
+) {
+  if (!offer) return;
+  try {
+    await scheduleOnce(
+      waitlistOfferQueue,
+      "expire-offer",
+      `${matchId}:${offer.userId}:${offer.expiresAt.getTime()}`,
+      { matchId, userId: offer.userId },
+      offer.expiresAt.getTime() - Date.now()
+    );
+  } catch (err) {
+    log.error({ err, matchId, userId: offer.userId }, "failed to schedule waitlist offer expiry");
+  }
+}
+
+matchesRouter.post("/matches/:id/waitlist/confirm", requireAuth, async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    const result = await confirmOffer(matchId, req.user!.id);
+    res.json({ status: result.status });
+  } catch (err) {
+    next(err);
+  }
+});
+
+matchesRouter.post("/matches/:id/waitlist/decline", requireAuth, async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    const result = await declineOffer(matchId, req.user!.id);
+    await scheduleOfferExpiry(req.log, matchId, result.offer);
+    res.json({ status: result.status, spotOffered: result.offer !== null });
   } catch (err) {
     next(err);
   }
