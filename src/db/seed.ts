@@ -16,33 +16,6 @@ async function seedFormats() {
   }
 }
 
-async function seedFormations() {
-  // A simple 7v7 "2-3-1" template as a starting point; more formations
-  // can be added the same way once the pitch-view UI needs them.
-  const template = await db
-    .insertInto("formation_templates")
-    .values({ players_per_side: 7, name: "2-3-1" })
-    .returning("id")
-    .executeTakeFirstOrThrow();
-
-  const slots: Array<{ slot_code: string; role: "GK" | "DEF" | "MID" | "FWD"; x: number; y: number }> = [
-    { slot_code: "GK", role: "GK", x: 50, y: 95 },
-    { slot_code: "DEF1", role: "DEF", x: 25, y: 75 },
-    { slot_code: "DEF2", role: "DEF", x: 75, y: 75 },
-    { slot_code: "MID1", role: "MID", x: 20, y: 50 },
-    { slot_code: "MID2", role: "MID", x: 50, y: 45 },
-    { slot_code: "MID3", role: "MID", x: 80, y: 50 },
-    { slot_code: "FWD1", role: "FWD", x: 50, y: 20 },
-  ];
-
-  for (const slot of slots) {
-    await db
-      .insertInto("formation_slots")
-      .values({ template_id: template.id, ...slot })
-      .execute();
-  }
-}
-
 async function seedVenues() {
   const venue = await db
     .insertInto("venues")
@@ -65,9 +38,10 @@ async function seedVenues() {
     .execute();
 }
 
+// Formations live in migration 0005: a lineup is meaningless without
+// them, so they ship with the schema rather than with sample data.
 async function main() {
   await seedFormats();
-  await seedFormations();
   await seedVenues();
   console.log("Seed complete.");
   await closeDb();

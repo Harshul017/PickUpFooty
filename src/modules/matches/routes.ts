@@ -5,6 +5,7 @@ import * as matchesService from "./service.js";
 import { joinOpenMatch } from "./join.js";
 import { leaveMatch } from "./leave.js";
 import { confirmOffer, declineOffer } from "./waitlist.js";
+import { clearSlot, getLineup, placeInSlot, setFormation } from "./lineup.js";
 import { waitlistOfferQueue, scheduleOnce } from "../../lib/queue.js";
 
 export const matchesRouter = Router();
@@ -136,6 +137,65 @@ matchesRouter.post("/matches/:id/waitlist/decline", requireAuth, async (req, res
     const result = await declineOffer(matchId, req.user!.id);
     await scheduleOfferExpiry(req.log, matchId, result.offer);
     res.json({ status: result.status, spotOffered: result.offer !== null });
+  } catch (err) {
+    next(err);
+  }
+});
+
+matchesRouter.get("/matches/:id/lineup", async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    res.json(await getLineup(matchId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+const formationSchema = z.object({ formationId: z.string().uuid() });
+
+matchesRouter.put("/matches/:id/formation", requireAuth, async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    const { formationId } = formationSchema.parse(req.body);
+    await setFormation(matchId, req.user!.id, formationId);
+    res.json(await getLineup(matchId));
+  } catch (err) {
+    next(err);
+  }
+});
+
+const placeSchema = z.object({
+  team: z.enum(["A", "B"]),
+  slotCode: z.string().min(1).max(16),
+  // Omitted means "me". Only the host may name someone else.
+  userId: z.string().uuid().optional(),
+});
+
+matchesRouter.post("/matches/:id/lineup", requireAuth, async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    const input = placeSchema.parse(req.body);
+    const placed = await placeInSlot({
+      matchId,
+      actorId: req.user!.id,
+      userId: input.userId ?? req.user!.id,
+      team: input.team,
+      slotCode: input.slotCode,
+    });
+    res.json(placed);
+  } catch (err) {
+    next(err);
+  }
+});
+
+const clearSchema = z.object({ userId: z.string().uuid().optional() });
+
+matchesRouter.post("/matches/:id/lineup/clear", requireAuth, async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    const input = clearSchema.parse(req.body ?? {});
+    await clearSlot(matchId, req.user!.id, input.userId ?? req.user!.id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

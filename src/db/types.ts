@@ -144,6 +144,46 @@ export interface DemeritsTable {
   expires_at: Timestamp;
 }
 
+export type MatchResultStatus = "SUBMITTED" | "DISPUTED" | "FINALIZED";
+
+export interface MatchResultsTable {
+  match_id: string;
+  score_a: number;
+  score_b: number;
+  submitted_by: string;
+  submitted_at: Generated<Timestamp>;
+  dispute_deadline: Timestamp;
+  status: Generated<MatchResultStatus>;
+  finalized_at: Timestamp | null;
+  ratings_applied_at: Timestamp | null;
+}
+
+export interface PlayerMatchStatsTable {
+  match_id: string;
+  user_id: string;
+  goals: Generated<number>;
+  assists: Generated<number>;
+  clean_sheet: Generated<boolean>;
+}
+
+export interface DisputesTable {
+  id: Generated<string>;
+  match_id: string;
+  raised_by: string;
+  reason: string;
+  status: Generated<"OPEN" | "RESOLVED" | "WITHDRAWN">;
+  resolved_by: string | null;
+  resolved_at: Timestamp | null;
+}
+
+export interface PeerRatingsTable {
+  match_id: string;
+  rater_id: string;
+  ratee_id: string;
+  score: number;
+  created_at: Generated<Timestamp>;
+}
+
 export interface DB {
   users: UsersTable;
   player_ratings: PlayerRatingsTable;
@@ -158,4 +198,8 @@ export interface DB {
   bans: BansTable;
   conduct_events: ConductEventsTable;
   demerits: DemeritsTable;
+  match_results: MatchResultsTable;
+  player_match_stats: PlayerMatchStatsTable;
+  disputes: DisputesTable;
+  peer_ratings: PeerRatingsTable;
 }

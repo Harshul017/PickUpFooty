@@ -35,5 +35,10 @@ export const Errors = {
     new AppError(400, "HOST_CANNOT_LEAVE", "The organizer cannot leave; cancel the match instead"),
   noLiveOffer: () =>
     new AppError(409, "NO_LIVE_OFFER", "You have no open offer for this match, or it has expired"),
+  slotTaken: () => new AppError(409, "SLOT_TAKEN", "Someone already took that position"),
+  unknownSlot: (slotCode: string) =>
+    new AppError(400, "UNKNOWN_SLOT", `This match's formation has no position "${slotCode}"`),
+  noFormation: () =>
+    new AppError(409, "NO_FORMATION", "This match has no formation set, so it has no positions yet"),
   ratingOutOfRange: (message: string) => new AppError(403, "RATING_OUT_OF_RANGE", message),
 };
