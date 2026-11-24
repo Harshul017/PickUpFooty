@@ -151,7 +151,18 @@ export async function getMatchState(db: Kysely<DB>, matchId: string) {
     .where("match_id", "=", matchId)
     .execute();
   const joinedCount = players.filter((p) => p.status === "JOINED").length;
-  return { ...match, players, joinedCount };
+  const offeredCount = players.filter((p) => p.status === "OFFERED").length;
+  const waitlistedCount = players.filter((p) => p.status === "WAITLISTED").length;
+  // The invariant the whole seat/offer system rests on: a spot held under
+  // an offer is still a spot taken.
+  return {
+    ...match,
+    players,
+    joinedCount,
+    offeredCount,
+    waitlistedCount,
+    heldCount: joinedCount + offeredCount,
+  };
 }
 
 /** Push a request's expiry into the past, as if its 45 minutes ran out. */
@@ -164,8 +175,9 @@ export async function expireNow(db: Kysely<DB>, requestId: string) {
 }
 
 /**
- * Simulate a player leaving a match (the leave endpoint isn't built yet):
- * their row becomes CANCELLED and, if they held a spot, it's freed.
+ * Free a spot the blunt way, with no penalty and no waitlist promotion.
+ * Used to arrange state for other tests; the real leave flow is covered in
+ * leaving.test.ts.
  */
 export async function leaveMatch(db: Kysely<DB>, matchId: string, userId: string) {
   await db.transaction().execute(async (trx) => {
@@ -185,4 +197,61 @@ export async function leaveMatch(db: Kysely<DB>, matchId: string, userId: string
         .execute();
     }
   });
+}
+
+/** Seat a player directly, bypassing the join cutoff. */
+export async function seatPlayer(db: Kysely<DB>, matchId: string, userId: string) {
+  await db
+    .insertInto("match_players")
+    .values({
+      match_id: matchId,
+      user_id: userId,
+      team: null,
+      slot_code: null,
+      status: "JOINED",
+      during: sql<string>`(SELECT during FROM matches WHERE id = ${matchId})`,
+      waitlist_position: null,
+      offer_expires_at: null,
+    })
+    .execute();
+  await db
+    .updateTable("matches")
+    .set({ filled: (eb) => eb("filled", "+", 1) })
+    .where("id", "=", matchId)
+    .execute();
+}
+
+/** Put a player on the waitlist at the next free position. */
+export async function waitlistPlayer(db: Kysely<DB>, matchId: string, userId: string) {
+  const { last } = await db
+    .selectFrom("match_players")
+    .select((eb) => eb.fn.max("waitlist_position").as("last"))
+    .where("match_id", "=", matchId)
+    .where("status", "=", "WAITLISTED")
+    .executeTakeFirstOrThrow();
+
+  await db
+    .insertInto("match_players")
+    .values({
+      match_id: matchId,
+      user_id: userId,
+      team: null,
+      slot_code: null,
+      status: "WAITLISTED",
+      during: null,
+      waitlist_position: (last ?? 0) + 1,
+      offer_expires_at: null,
+    })
+    .execute();
+}
+
+/** Count a player's unexpired demerit points. */
+export async function activeDemeritPoints(db: Kysely<DB>, userId: string): Promise<number> {
+  const row = await db
+    .selectFrom("demerits")
+    .select(sql<string>`coalesce(sum(points), 0)`.as("points"))
+    .where("user_id", "=", userId)
+    .where("expires_at", ">", sql<Date>`now()`)
+    .executeTakeFirstOrThrow();
+  return Number(row.points);
 }

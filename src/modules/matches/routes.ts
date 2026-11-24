@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireAuth } from "../auth/middleware.js";
 import * as matchesService from "./service.js";
 import { joinOpenMatch } from "./join.js";
+import { leaveMatch } from "./leave.js";
+import { waitlistOfferQueue, scheduleOnce } from "../../lib/queue.js";
 
 export const matchesRouter = Router();
 
@@ -65,6 +67,43 @@ matchesRouter.post("/matches/:id/join", requireAuth, async (req, res, next) => {
     const matchId = z.string().uuid().parse(req.params.id);
     const result = await joinOpenMatch(matchId, req.user!.id);
     res.status(result.status === "JOINED" ? 200 : 202).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+matchesRouter.post("/matches/:id/leave", requireAuth, async (req, res, next) => {
+  try {
+    const matchId = z.string().uuid().parse(req.params.id);
+    const result = await leaveMatch(matchId, req.user!.id);
+
+    // Committed by now. The job only flips the offer to expired and tells
+    // the next player; the offer's own deadline is already enforced by
+    // every query that reads it, so a lost job costs a notification and a
+    // little delay, never correctness.
+    if (result.offer) {
+      const { userId, expiresAt } = result.offer;
+      try {
+        await scheduleOnce(
+          waitlistOfferQueue,
+          "expire-offer",
+          `${matchId}:${userId}:${expiresAt.getTime()}`,
+          { matchId, userId },
+          expiresAt.getTime() - Date.now()
+        );
+      } catch (err) {
+        req.log.error({ err, matchId, userId }, "failed to schedule waitlist offer expiry");
+      }
+    }
+
+    res.json({
+      status: result.status,
+      heldSpot: result.heldSpot,
+      penalty: result.penalty,
+      banEndsAt: result.banEndsAt,
+      // Who got the spot is the organizer's business, not the leaver's.
+      spotOffered: result.offer !== null,
+    });
   } catch (err) {
     next(err);
   }
