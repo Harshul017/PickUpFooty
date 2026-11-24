@@ -2,6 +2,7 @@ import { sql } from "kysely";
 import { db } from "../../lib/db.js";
 import { Errors } from "../../lib/errors.js";
 import { RULES } from "../../lib/time.js";
+import { recordNoShow } from "../discipline/service.js";
 
 export interface PlayerStatInput {
   userId: string;
@@ -177,4 +178,50 @@ export async function getResult(matchId: string) {
     .execute();
 
   return { ...result, players: stats };
+}
+
+export interface FinalizedResult {
+  matchId: string;
+  penalised: Array<{ userId: string; kind: string }>;
+}
+
+/**
+ * Close the book on a result nobody objected to.
+ *
+ * The whole decision is the WHERE clause: still SUBMITTED, and past its
+ * deadline. A second run, an early run, or a run against a disputed
+ * result all match nothing and return null, so the job that calls this
+ * can be delivered twice or hours late without consequence.
+ *
+ * No-show penalties land here rather than at submission, because this is
+ * the first moment the result is beyond argument.
+ */
+export async function finalizeResult(matchId: string): Promise<FinalizedResult | null> {
+  return db.transaction().execute(async (trx) => {
+    const finalized = await trx
+      .updateTable("match_results")
+      .set({ status: "FINALIZED", finalized_at: sql<Date>`now()` })
+      .where("match_id", "=", matchId)
+      .where("status", "=", "SUBMITTED")
+      .where("dispute_deadline", "<=", sql<Date>`now()`)
+      .returning("match_id")
+      .executeTakeFirst();
+
+    if (!finalized) return null;
+
+    const absent = await trx
+      .selectFrom("match_players")
+      .select("user_id")
+      .where("match_id", "=", matchId)
+      .where("status", "=", "NO_SHOW")
+      .execute();
+
+    const penalised = [];
+    for (const player of absent) {
+      const applied = await recordNoShow(trx, player.user_id, matchId);
+      penalised.push({ userId: player.user_id, kind: applied.kind });
+    }
+
+    return { matchId, penalised };
+  });
 }

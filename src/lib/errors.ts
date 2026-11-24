@@ -61,5 +61,8 @@ export const Errors = {
   alreadyDisputed: () =>
     new AppError(409, "ALREADY_DISPUTED", "You have already raised a dispute for this match"),
   noOpenDispute: () => new AppError(409, "NO_OPEN_DISPUTE", "There is no open dispute to resolve"),
+  ratingWindowClosed: (hours: number) =>
+    new AppError(409, "RATING_WINDOW_CLOSED", `Teammates can only be rated within ${hours} hours of the match`),
+  cannotRateSelf: () => new AppError(400, "CANNOT_RATE_SELF", "You cannot rate yourself"),
   ratingOutOfRange: (message: string) => new AppError(403, "RATING_OUT_OF_RANGE", message),
 };

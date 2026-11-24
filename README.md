@@ -25,6 +25,9 @@ Full design doc: see `docs/design.md`
   state to an expiry: `(status = 'OFFERED') = (offer_expires_at IS NOT NULL)`.
   So `matches.filled` always equals `JOINED + OFFERED`, and a spot can
   never be quietly held forever.
+- **No two players in one position.** A partial unique index on
+  `(match, team, slot)` settles a contested position, so two players
+  tapping goalkeeper at the same instant can't both end up in goal.
 
 See `tests/concurrency/last-spot.test.ts` for a test that fires 200
 simultaneous join attempts at a 10-spot match and asserts exactly 10
@@ -85,11 +88,12 @@ load/             k6 load-test scripts (added in week 4)
 
 Built and tested: accounts, venues and pitches, match creation, open joins
 with a waitlist, organizer approval of join requests with automatic
-expiry, and leaving a match with the late-cancellation penalty ladder and
-waitlist promotion.
+expiry, leaving a match with the late-cancellation penalty ladder and
+waitlist promotion, lineups on a formation, result submission, the
+24-hour dispute window with automatic finalisation, and peer ratings.
 
-Next: lineups and results, then ratings and the weekly leaderboard. See
-the design doc for the full plan.
+Next: the rating engine and the weekly leaderboard. See the design doc
+for the full plan.
 
 ## API reference (current)
 
@@ -114,6 +118,16 @@ the design doc for the full plan.
 | POST | `/api/v1/matches/:id/waitlist/confirm` | Offered player | takes the spot; 409 `NO_LIVE_OFFER` once the window closes |
 | POST | `/api/v1/matches/:id/waitlist/decline` | Offered player | passes the spot to the next player in line |
 | GET | `/api/v1/me/discipline` | Player | own warnings, demerit points, active ban, and what the next late cancel would cost |
+| GET | `/api/v1/matches/:id/lineup` | — | every position, who is in it, and who is spare |
+| PUT | `/api/v1/matches/:id/formation` | Host | must match the match size; clears the pitch |
+| POST | `/api/v1/matches/:id/lineup` | Player | take a position; 409 `SLOT_TAKEN`. Host may name another player |
+| POST | `/api/v1/matches/:id/lineup/clear` | Player | step off the pitch without leaving the match |
+| POST | `/api/v1/matches/:id/result` | Host | goals must add up to the score; one submission only |
+| GET | `/api/v1/matches/:id/result` | — | score plus every player's line |
+| POST | `/api/v1/matches/:id/disputes` | Participant | freezes the result; 409 once the window closes |
+| GET | `/api/v1/matches/:id/disputes` | Player | objections raised about a match |
+| PATCH | `/api/v1/admin/matches/:id/dispute` | Admin | `DISMISSED` finalises it, `UPHELD` voids it for resubmission |
+| POST | `/api/v1/matches/:id/ratings` | Participant | rate teammates 1-5 within 48 hours; may report lateness |
 
 More endpoints land as each week's features are built — see the design
 doc's API section for the full planned surface.

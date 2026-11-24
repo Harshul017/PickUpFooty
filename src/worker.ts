@@ -2,6 +2,7 @@ import { Worker } from "bullmq";
 import { redis } from "./lib/redis.js";
 import { logger } from "./lib/logger.js";
 import { waitlistOfferQueue, scheduleOnce } from "./lib/queue.js";
+import { finalizeResult } from "./modules/results/service.js";
 import { expireRequest } from "./modules/requests/service.js";
 import { expireOffer } from "./modules/matches/waitlist.js";
 
@@ -55,7 +56,28 @@ const waitlistOfferWorker = new Worker(
   { connection: redis }
 );
 
-for (const worker of [requestExpiryWorker, waitlistOfferWorker]) {
+// Result finalisation: a result nobody disputed becomes final once its
+// 24-hour window closes, and that is when no-shows are charged for.
+// Guarded by status and deadline, so a duplicate or late run is a no-op
+// and a disputed result is simply left alone for a human.
+const matchLifecycleWorker = new Worker(
+  "match-lifecycle",
+  async (job) => {
+    const { matchId } = job.data as { matchId: string };
+    const finalized = await finalizeResult(matchId);
+
+    if (finalized) {
+      logger.info(
+        { matchId, penalised: finalized.penalised.length },
+        "result finalised"
+      );
+      // TODO: notify players; apply ratings once Phase 7 lands.
+    }
+  },
+  { connection: redis }
+);
+
+for (const worker of [requestExpiryWorker, waitlistOfferWorker, matchLifecycleWorker]) {
   worker.on("failed", (job, err) => {
     logger.error({ jobId: job?.id, err }, "job failed");
   });

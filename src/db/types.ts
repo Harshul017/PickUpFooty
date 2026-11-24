@@ -181,6 +181,7 @@ export interface PeerRatingsTable {
   rater_id: string;
   ratee_id: string;
   score: number;
+  late_arrival: Generated<boolean>;
   created_at: Generated<Timestamp>;
 }
 

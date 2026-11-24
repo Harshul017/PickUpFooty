@@ -5,7 +5,10 @@ import { toTsRange } from "../../src/lib/time.js";
 
 const MIN = 60_000;
 
-export async function createUser(db: Kysely<DB>, opts: { rating?: number } = {}) {
+export async function createUser(
+  db: Kysely<DB>,
+  opts: { rating?: number; role?: "PLAYER" | "ADMIN" } = {}
+) {
   const user = await db
     .insertInto("users")
     .values({
@@ -13,7 +16,7 @@ export async function createUser(db: Kysely<DB>, opts: { rating?: number } = {})
       email: `${randomUUID()}@test.local`,
       phone: null,
       password_hash: "not-a-real-hash",
-      role: "PLAYER",
+      role: opts.role ?? "PLAYER",
       area: null,
       preferred_position: null,
       preferred_foot: null,
@@ -290,4 +293,24 @@ export async function getStats(db: Kysely<DB>, matchId: string) {
     .select(["user_id", "goals", "assists", "clean_sheet"])
     .where("match_id", "=", matchId)
     .execute();
+}
+
+/** Push a result's dispute window into the past, as if 24 hours passed. */
+export async function closeDisputeWindow(db: Kysely<DB>, matchId: string) {
+  await db
+    .updateTable("match_results")
+    .set({ dispute_deadline: sql<Date>`now() - interval '1 second'` })
+    .where("match_id", "=", matchId)
+    .execute();
+}
+
+/** How many conduct events of a kind a player has on record. */
+export async function countConduct(db: Kysely<DB>, userId: string, type: string) {
+  const row = await db
+    .selectFrom("conduct_events")
+    .select((eb) => eb.fn.countAll<string>().as("count"))
+    .where("user_id", "=", userId)
+    .where("type", "=", type as "LATE_CANCEL" | "NO_SHOW")
+    .executeTakeFirstOrThrow();
+  return Number(row.count);
 }
